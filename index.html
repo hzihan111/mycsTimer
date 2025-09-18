@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>魔方火柴式計時器（單秒數模式）</title>
+<style>
+body { margin:0; font-family:monospace; background:#111; color:white; user-select:none; height:100vh; display:flex; flex-direction:column; align-items:center; }
+#timerLayer { position:fixed; top:0; left:0; right:0; bottom:0; z-index:1; touch-action:none; }
+#scramble, #timer, #diff, #stats, #historyContainer { position:relative; z-index:2; transition: opacity 0.2s; }
+#scramble { font-size:1.2em; margin:16px; text-align:center; max-width:95%; white-space:pre-wrap; word-break:break-word; }
+#timer { font-size:5em; margin-bottom:0; transition: color 0.2s; }
+#diff { font-size:1.5em; margin-bottom:8px; }
+#stats p { margin:2px 0; }
+#historyContainer { width:95%; max-width:500px; display:flex; flex-direction:column; align-items:flex-start; margin-bottom:16px; }
+#controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:4px; }
+#historyList { max-height:200px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-left:16px; margin-top:4px; width:100%; }
+#historyList li { margin-bottom:4px; cursor:pointer; }
+.fastest { color: lime; font-weight: bold; }
+.slowest { color: red; font-weight: bold; }
+#minimalTimer { display:none; font-size:5em; color:white; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:3; }
+</style>
+</head>
+<body>
+
+<div id="timerLayer"></div>
+
+<div id="scramble"></div>
+<div id="timer">0.000</div>
+<div id="diff"></div>
+
+<div id="stats">
+  <p>AVG: 0.000</p>
+  <p>AO5: --</p>
+  <p>AO12: --</p>
+</div>
+
+<div id="historyContainer">
+  <div id="controls">
+    <label for="batchSelect">選擇梯次:</label>
+    <select id="batchSelect"></select>
+    <button id="clearAllBtn">清除全部</button>
+    <button id="exportBtn">匯出數據</button>
+  </div>
+  <ul id="historyList"></ul>
+</div>
+
+<div id="minimalTimer">0.000</div>
+
+<script>
+// ===== scramble =====
+function generateScramble(len=20){
+  const faces=['R','L','U','D','F','B'];
+  const mods=["","'","2"];
+  const axis={R:'x',L:'x',U:'y',D:'y',F:'z',B:'z'};
+  let scramble=[], last1=null, last2=null;
+  while(scramble.length<len){
+    let f=faces[Math.floor(Math.random()*faces.length)];
+    let a=axis[f];
+    if(a===last1||a===last2) continue;
+    scramble.push(f+mods[Math.floor(Math.random()*mods.length)]);
+    last2=last1;
+    last1=a;
+  }
+  return scramble.join('\u00A0');
+}
+function newScramble(){
+  let el=document.getElementById('scramble');
+  el.style.opacity=0;
+  setTimeout(()=>{ el.textContent=generateScramble(); el.style.opacity=1; },100);
+}
+
+// ===== 火柴式計時器 =====
+let timerEl=document.getElementById("timer");
+let minimalEl=document.getElementById("minimalTimer");
+let diffEl=document.getElementById("diff");
+let startTime=null, interval=null, readyTimeout=null, resetTimeout=null, state="idle";
+let times=[], batchSelect=document.getElementById('batchSelect'), historyList=document.getElementById('historyList'), stats=document.getElementById('stats');
+
+function updateTimer(){ 
+  let val=((performance.now()-startTime)/1000).toFixed(3);
+  minimalEl.textContent=val;
+  timerEl.textContent=val;
+}
+function startTimer(){ 
+  startTime=performance.now(); 
+  interval=setInterval(updateTimer,10); 
+  state="running"; 
+
+  // 隱藏所有非計時元素，顯示單秒數
+  document.getElementById('scramble').style.display='none';
+  document.getElementById('historyContainer').style.display='none';
+  document.getElementById('stats').style.display='none';
+  document.getElementById('diff').style.display='none';
+  timerEl.style.display='none';
+  minimalEl.style.display='block';
+
+  if(navigator.vibrate) navigator.vibrate(50); 
+}
+
+function stopTimer(){ 
+  clearInterval(interval); 
+  interval=null; 
+  state="idle"; 
+
+  // 隱藏 minimalEl，顯示完整元素
+  minimalEl.style.display='none';
+  timerEl.style.display='block';
+  document.getElementById('scramble').style.display='block';
+  document.getElementById('historyContainer').style.display='flex';
+  document.getElementById('stats').style.display='block';
+  document.getElementById('diff').style.display='block';
+
+  addHistory(parseFloat(timerEl.textContent)); 
+  newScramble(); 
+}
+
+// ===== 歷史管理與統計 =====
+function addHistory(time){
+  times.push(time);
+  updateDiff();
+  let currentBatch=batchSelect.selectedIndex;
+  renderBatchOptions(currentBatch);
+  showBatch(batchSelect.selectedIndex);
+  updateStats();
+}
+
+function updateDiff(){
+  if(times.length>=2){
+    let diff=times[times.length-1]-times[times.length-2];
+    let sign=diff>0?"+":"";
+    let color=diff>0?"red":"lime";
+    diffEl.innerHTML=`<span style="color:${color}">(${sign}${diff.toFixed(3)})</span>`;
+  } else diffEl.innerHTML="";
+}
+
+function updateStats(){
+  if(times.length===0){ stats.innerHTML="<p>AVG:0.000</p><p>AO5:--</p><p>AO12:--</p>"; return; }
+  let sum=times.reduce((a,b)=>a+b,0), avg=(sum/times.length).toFixed(3);
+
+  let ao5="--";
+  if(times.length>=5){ let r5=times.slice(-5), max=Math.max(...r5), min=Math.min(...r5); let f=r5.filter(t=>t!==max && t!==min); ao5=(f.reduce((a,b)=>a+b,0)/f.length).toFixed(3);}
+  let ao12="--";
+  if(times.length>=12){ let r12=times.slice(-12), max=Math.max(...r12), min=Math.min(...r12); let f=r12.filter(t=>t!==max && t!==min); ao12=(f.reduce((a,b)=>a+b,0)/f.length).toFixed(3);}
+
+  let minTime=Math.min(...times), maxTime=Math.max(...times);
+  stats.innerHTML=`<p>AVG: ${avg} <span>最快: ${minTime.toFixed(3)} 最慢: ${maxTime.toFixed(3)}</span></p><p>AO5: ${ao5}</p><p>AO12: ${ao12}</p>`;
+}
+
+function renderBatchOptions(selectedIndex){
+  batchSelect.innerHTML='';
+  let totalBatches=Math.ceil(times.length/10);
+  for(let i=0;i<totalBatches;i++){
+    let option=document.createElement('option');
+    option.value=i;
+    let start=i*10+1, end=Math.min((i+1)*10,times.length);
+    option.textContent=`第 ${start} ~ ${end} 次`;
+    batchSelect.appendChild(option);
+  }
+  if(selectedIndex>=0 && selectedIndex<totalBatches) batchSelect.selectedIndex=selectedIndex;
+  else batchSelect.selectedIndex=totalBatches-1;
+}
+
+function showBatch(batchIndex){
+  historyList.innerHTML='';
+  let start=batchIndex*10, end=Math.min(start+10,times.length);
+  let minTime=Math.min(...times), maxTime=Math.max(...times);
+  for(let i=start;i<end;i++){
+    let li=document.createElement('li');
+    li.textContent=`${i+1}. ${times[i].toFixed(3)}`;
+    if(times[i]===minTime) li.classList.add('fastest');
+    if(times[i]===maxTime) li.classList.add('slowest');
+    li.addEventListener('click',()=>{
+      times.splice(i,1);
+      let currentBatch=batchSelect.selectedIndex;
+      renderBatchOptions(currentBatch);
+      showBatch(batchSelect.selectedIndex);
+      updateStats();
+      updateDiff();
+    });
+    historyList.appendChild(li);
+  }
+}
+
+batchSelect.addEventListener('change', e=>{ showBatch(parseInt(e.target.value)); });
+
+// ===== 清除全部 =====
+document.getElementById('clearAllBtn').addEventListener('click',()=>{
+  if(confirm("確定要清除所有紀錄嗎？")){
+    times=[];
+    renderBatchOptions(0);
+    showBatch(0);
+    updateStats();
+    updateDiff();
+  }
+});
+
+// ===== 匯出數據 =====
+document.getElementById('exportBtn').addEventListener('click',()=>{
+  if(times.length===0){ alert("目前沒有數據可匯出"); return; }
+  let csv="序號,時間,與上一筆差值,梯次\n";
+  let batchSize=10;
+  times.forEach((t,i)=>{
+    let diff=i>0? (t-times[i-1]).toFixed(3) : "";
+    let batch=Math.floor(i/batchSize)+1;
+    csv+=`${i+1},${t.toFixed(3)},${diff},${batch}\n`;
+  });
+  let blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  let url=URL.createObjectURL(blob);
+  let a=document.createElement('a');
+  a.href=url;
+  a.download="cube_timer_data.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// ===== 計時中長按重置 =====
+function resetTimerDuringRun(){
+  clearInterval(interval);
+  interval=null;
+  startTime=null;
+  state="idle";
+  timerEl.textContent="0.000";
+  minimalEl.textContent="0.000";
+  minimalEl.style.display="none";
+  document.getElementById('scramble').style.display='block';
+  document.getElementById('historyContainer').style.display='flex';
+  document.getElementById('stats').style.display='block';
+  diffEl.innerHTML="";
+}
+
+// ===== 火柴式長按觸控 =====
+function handlePressStart(e){
+  if(e.cancelable) e.preventDefault();
+  clearTimeout(resetTimeout);
+  if(state==="idle"){ 
+    state="holding"; 
+    timerEl.style.color="red";
+    readyTimeout=setTimeout(()=>{ 
+      if(state==="holding"){ state="ready"; timerEl.style.color="lime"; } 
+    },500);
+  } else if(state==="running"){ 
+    resetTimeout=setTimeout(()=>{ if(state==="running") resetTimerDuringRun(); },3000);
+  }
+}
+
+function handlePressEnd(e){
+  if(e.cancelable) e.preventDefault();
+  clearTimeout(readyTimeout);
+  clearTimeout(resetTimeout);
+  if(state==="ready") startTimer();
+  else if(state==="running") stopTimer();
+  else{ state="idle"; timerEl.style.color="white"; }
+}
+
+// 綁定觸控
+const layer=document.getElementById('timerLayer');
+[layer,document.getElementById('scramble'),historyList].forEach(el=>{
+  el.addEventListener("touchstart",handlePressStart,{passive:false});
+  el.addEventListener("mousedown",handlePressStart,{passive:false});
+  el.addEventListener("touchend",handlePressEnd,{passive:false});
+  el.addEventListener("mouseup",handlePressEnd,{passive:false});
+});
+
+// ===== 空白鍵長按觸控 =====
+document.addEventListener("keydown", e=>{
+  if(e.code==="Space"){
+    e.preventDefault();
+    clearTimeout(resetTimeout);
+    if(state==="idle"){ 
+      state="holding"; 
+      timerEl.style.color="red";
+      readyTimeout=setTimeout(()=>{ 
+        if(state==="holding"){ state="ready"; timerEl.style.color="lime"; } 
+      },500);
+    } else if(state==="running"){
+      resetTimeout=setTimeout(()=>{ if(state==="running") resetTimerDuringRun(); },3000);
+    }
+  }
+});
+document.addEventListener("keyup",e=>{
+  if(e.code==="Space"){ e.preventDefault(); clearTimeout(readyTimeout); clearTimeout(resetTimeout);
+    if(state==="ready") startTimer(); else if(state==="running") stopTimer(); else{ state="idle"; timerEl.style.color="white"; }
+  }
+});
+
+// 初始 scramble
+newScramble();
+</script>
+</body>
+</html>
