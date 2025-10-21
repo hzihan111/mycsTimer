@@ -1,29 +1,60 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
+  <link id="favicon" rel="icon" href="" />
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>魔方火柴式計時器（單秒數模式）</title>
+<title>hontimer</title>
 <style>
-body { margin:0; font-family:monospace; background:#111; color:white; user-select:none; height:100vh; display:flex; flex-direction:column; align-items:center; }
+body { margin:0; font-family:monospace; background:#111; color:white; user-select:none; height:100vh; display:flex; flex-direction:column; align-items:center; overflow-x:hidden; }
 #timerLayer { position:fixed; top:0; left:0; right:0; bottom:0; z-index:1; touch-action:none; }
 #scramble, #timer, #diff, #stats, #historyContainer { position:relative; z-index:2; transition: opacity 0.2s; }
 #scramble { font-size:1.2em; margin:16px; text-align:center; max-width:95%; white-space:pre-wrap; word-break:break-word; }
+
+/* 魔方展開圖樣式 */
+#cubeVisualization { position:fixed; bottom:20px; right:20px; z-index:10; background:rgba(0,0,0,0.7); padding:10px; border-radius:8px; }
+.cube-net { display:grid; grid-template-columns:repeat(3,50px); grid-template-rows:repeat(4,50px); gap:2px; background:#333; padding:2px; }
+.face { display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr); gap:1px; background:#333; padding:1px; }
+.sticker { width:100%; height:100%; border-radius:1px; }
+.white { background-color:#ffffff; }
+.yellow { background-color:#ffeb3b; }
+.green { background-color:#4caf50; }
+.blue { background-color:#2196f3; }
+.red { background-color:#f44336; }
+.orange { background-color:#ff9800; }
+.empty { background:transparent; }
+
 #timer { font-size:5em; margin-bottom:0; transition: color 0.2s; }
-#diff { font-size:1.5em; margin-bottom:8px; }
+#diff { font-size:1.5em; margin-bottom:8px; min-height:1.5em; }
+#stats { text-align:center; }
 #stats p { margin:2px 0; }
 #historyContainer { width:95%; max-width:500px; display:flex; flex-direction:column; align-items:flex-start; margin-bottom:16px; }
 #controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:4px; }
 #historyList { max-height:200px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-left:16px; margin-top:4px; width:100%; }
-#historyList li { margin-bottom:4px; cursor:pointer; }
+#historyList li { margin-bottom:4px; cursor:pointer; transition: background 0.2s; padding:2px 4px; border-radius:3px; }
+#historyList li:hover { background:#333; }
 .fastest { color: lime; font-weight: bold; }
 .slowest { color: red; font-weight: bold; }
 #minimalTimer { display:none; font-size:5em; color:white; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:3; }
+button { background:#333; color:white; border:1px solid #555; padding:4px 8px; border-radius:4px; cursor:pointer; font-family:monospace; }
+button:hover { background:#444; }
+button:active { background:#222; }
+select { background:#333; color:white; border:1px solid #555; padding:4px; border-radius:4px; font-family:monospace; }
+
+@media (max-width: 600px) {
+  #cubeVisualization { bottom:10px; right:10px; padding:6px; }
+  .cube-net { grid-template-columns:repeat(3,35px); grid-template-rows:repeat(4,35px); }
+}
 </style>
 </head>
 <body>
 
 <div id="timerLayer"></div>
+
+<!-- 魔方展開圖 -->
+<div id="cubeVisualization">
+  <div class="cube-net" id="cubeNet"></div>
+</div>
 
 <div id="scramble"></div>
 <div id="timer">0.000</div>
@@ -48,6 +79,109 @@ body { margin:0; font-family:monospace; background:#111; color:white; user-selec
 <div id="minimalTimer">0.000</div>
 
 <script>
+// ===== 魔方模擬器 =====
+class RubiksCube {
+  constructor() { this.reset(); }
+  reset() {
+    this.state = {
+      U: Array(9).fill('W'), D: Array(9).fill('Y'),
+      F: Array(9).fill('G'), B: Array(9).fill('B'),
+      L: Array(9).fill('O'), R: Array(9).fill('R')
+    };
+  }
+  rotateFace(face, clockwise=true) {
+    const f=this.state[face];
+    if(clockwise) this.state[face]=[f[6],f[3],f[0],f[7],f[4],f[1],f[8],f[5],f[2]];
+    else this.state[face]=[f[2],f[5],f[8],f[1],f[4],f[7],f[0],f[3],f[6]];
+  }
+  R() {
+    this.rotateFace('R');
+    const temp=[this.state.U[2],this.state.U[5],this.state.U[8]];
+    this.state.U[2]=this.state.F[2]; this.state.U[5]=this.state.F[5]; this.state.U[8]=this.state.F[8];
+    this.state.F[2]=this.state.D[2]; this.state.F[5]=this.state.D[5]; this.state.F[8]=this.state.D[8];
+    this.state.D[2]=this.state.B[6]; this.state.D[5]=this.state.B[3]; this.state.D[8]=this.state.B[0];
+    this.state.B[6]=temp[0]; this.state.B[3]=temp[1]; this.state.B[0]=temp[2];
+  }
+  L() {
+    this.rotateFace('L');
+    const temp=[this.state.U[0],this.state.U[3],this.state.U[6]];
+    this.state.U[0]=this.state.B[8]; this.state.U[3]=this.state.B[5]; this.state.U[6]=this.state.B[2];
+    this.state.B[8]=this.state.D[0]; this.state.B[5]=this.state.D[3]; this.state.B[2]=this.state.D[6];
+    this.state.D[0]=this.state.F[0]; this.state.D[3]=this.state.F[3]; this.state.D[6]=this.state.F[6];
+    this.state.F[0]=temp[0]; this.state.F[3]=temp[1]; this.state.F[6]=temp[2];
+  }
+  U() {
+    this.rotateFace('U');
+    const temp=[this.state.F[0],this.state.F[1],this.state.F[2]];
+    this.state.F[0]=this.state.R[0]; this.state.F[1]=this.state.R[1]; this.state.F[2]=this.state.R[2];
+    this.state.R[0]=this.state.B[0]; this.state.R[1]=this.state.B[1]; this.state.R[2]=this.state.B[2];
+    this.state.B[0]=this.state.L[0]; this.state.B[1]=this.state.L[1]; this.state.B[2]=this.state.L[2];
+    this.state.L[0]=temp[0]; this.state.L[1]=temp[1]; this.state.L[2]=temp[2];
+  }
+  D() {
+    this.rotateFace('D');
+    const temp=[this.state.F[6],this.state.F[7],this.state.F[8]];
+    this.state.F[6]=this.state.L[6]; this.state.F[7]=this.state.L[7]; this.state.F[8]=this.state.L[8];
+    this.state.L[6]=this.state.B[6]; this.state.L[7]=this.state.B[7]; this.state.L[8]=this.state.B[8];
+    this.state.B[6]=this.state.R[6]; this.state.B[7]=this.state.R[7]; this.state.B[8]=this.state.R[8];
+    this.state.R[6]=temp[0]; this.state.R[7]=temp[1]; this.state.R[8]=temp[2];
+  }
+  F() {
+    this.rotateFace('F');
+    const temp=[this.state.U[6],this.state.U[7],this.state.U[8]];
+    this.state.U[6]=this.state.L[8]; this.state.U[7]=this.state.L[5]; this.state.U[8]=this.state.L[2];
+    this.state.L[2]=this.state.D[0]; this.state.L[5]=this.state.D[1]; this.state.L[8]=this.state.D[2];
+    this.state.D[0]=this.state.R[6]; this.state.D[1]=this.state.R[3]; this.state.D[2]=this.state.R[0];
+    this.state.R[0]=temp[0]; this.state.R[3]=temp[1]; this.state.R[6]=temp[2];
+  }
+  B() {
+    this.rotateFace('B');
+    const temp=[this.state.U[0],this.state.U[1],this.state.U[2]];
+    this.state.U[0]=this.state.R[2]; this.state.U[1]=this.state.R[5]; this.state.U[2]=this.state.R[8];
+    this.state.R[2]=this.state.D[8]; this.state.R[5]=this.state.D[7]; this.state.R[8]=this.state.D[6];
+    this.state.D[6]=this.state.L[0]; this.state.D[7]=this.state.L[3]; this.state.D[8]=this.state.L[6];
+    this.state.L[0]=temp[2]; this.state.L[3]=temp[1]; this.state.L[6]=temp[0];
+  }
+  executeMove(move) {
+    const baseMoves={'R':()=>this.R(),'L':()=>this.L(),'U':()=>this.U(),'D':()=>this.D(),'F':()=>this.F(),'B':()=>this.B()};
+    const base=move.replace(/['2]/g,'');
+    if(!baseMoves[base]) return false;
+    if(move.includes('2')){ baseMoves[base](); baseMoves[base](); }
+    else if(move.includes("'")){ baseMoves[base](); baseMoves[base](); baseMoves[base](); }
+    else baseMoves[base]();
+    return true;
+  }
+}
+
+let cube=new RubiksCube();
+
+function renderCube() {
+  const net=document.getElementById('cubeNet');
+  net.innerHTML='';
+  const layout=[[null,'U',null],['L','F','R'],[null,'D',null],[null,'B',null]];
+  const colorMap={'W':'white','Y':'yellow','G':'green','B':'blue','R':'red','O':'orange'};
+  layout.forEach(row=>{
+    row.forEach(face=>{
+      if(face===null){
+        const emptyFace=document.createElement('div');
+        emptyFace.className='face empty';
+        net.appendChild(emptyFace);
+      } else {
+        const faceDiv=document.createElement('div');
+        faceDiv.className='face';
+        let faceData=cube.state[face];
+        if(face==='B') faceData=[faceData[8],faceData[7],faceData[6],faceData[5],faceData[4],faceData[3],faceData[2],faceData[1],faceData[0]];
+        faceData.forEach(color=>{
+          const sticker=document.createElement('div');
+          sticker.className=`sticker ${colorMap[color]}`;
+          faceDiv.appendChild(sticker);
+        });
+        net.appendChild(faceDiv);
+      }
+    });
+  });
+}
+
 // ===== scramble =====
 function generateScramble(len=20){
   const faces=['R','L','U','D','F','B'];
@@ -64,10 +198,21 @@ function generateScramble(len=20){
   }
   return scramble.join('\u00A0');
 }
+
+let currentScramble="";
 function newScramble(){
   let el=document.getElementById('scramble');
   el.style.opacity=0;
-  setTimeout(()=>{ el.textContent=generateScramble(); el.style.opacity=1; },100);
+  setTimeout(()=>{ 
+    currentScramble=generateScramble(); 
+    el.textContent=currentScramble; 
+    el.style.opacity=1;
+    // 更新魔方視覺化
+    cube.reset();
+    const moves=currentScramble.split(/\s+/);
+    moves.forEach(move=>cube.executeMove(move));
+    renderCube();
+  },100);
 }
 
 // ===== 火柴式計時器 =====
@@ -92,6 +237,7 @@ function startTimer(){
   document.getElementById('historyContainer').style.display='none';
   document.getElementById('stats').style.display='none';
   document.getElementById('diff').style.display='none';
+  document.getElementById('cubeVisualization').style.display='none';
   timerEl.style.display='none';
   minimalEl.style.display='block';
 
@@ -110,14 +256,37 @@ function stopTimer(){
   document.getElementById('historyContainer').style.display='flex';
   document.getElementById('stats').style.display='block';
   document.getElementById('diff').style.display='block';
+  document.getElementById('cubeVisualization').style.display='block';
 
   addHistory(parseFloat(timerEl.textContent)); 
   newScramble(); 
 }
 
-// ===== 歷史管理與統計 =====
+// ===== 歷史管理與統計（含站存） =====
+function loadHistory(){
+  let stored=localStorage.getItem("cube_times");
+  if(stored){
+    try {
+      times=JSON.parse(stored);
+      if(!Array.isArray(times)) times=[];
+      renderBatchOptions(0);
+      showBatch(batchSelect.selectedIndex);
+      updateStats();
+      updateDiff();
+    } catch(e) {
+      console.error("載入歷史失敗:", e);
+      times=[];
+    }
+  }
+}
+
+function saveHistory(){
+  localStorage.setItem("cube_times", JSON.stringify(times));
+}
+
 function addHistory(time){
   times.push(time);
+  saveHistory();
   updateDiff();
   let currentBatch=batchSelect.selectedIndex;
   renderBatchOptions(currentBatch);
@@ -128,8 +297,7 @@ function addHistory(time){
 function updateDiff(){
   if(times.length>=2){
     let diff=times[times.length-1]-times[times.length-2];
-    let sign=diff>0?"+":"";
-    let color=diff>0?"red":"lime";
+    let sign=diff>0?"+":""; let color=diff>0?"red":"lime";
     diffEl.innerHTML=`<span style="color:${color}">(${sign}${diff.toFixed(3)})</span>`;
   } else diffEl.innerHTML="";
 }
@@ -144,11 +312,18 @@ function updateStats(){
   if(times.length>=12){ let r12=times.slice(-12), max=Math.max(...r12), min=Math.min(...r12); let f=r12.filter(t=>t!==max && t!==min); ao12=(f.reduce((a,b)=>a+b,0)/f.length).toFixed(3);}
 
   let minTime=Math.min(...times), maxTime=Math.max(...times);
-  stats.innerHTML=`<p>AVG: ${avg} <span>最快: ${minTime.toFixed(3)} 最慢: ${maxTime.toFixed(3)}</span></p><p>AO5: ${ao5}</p><p>AO12: ${ao12}</p>`;
+  stats.innerHTML=`<p>AVG: ${avg} <span style="color:#888">最快: ${minTime.toFixed(3)} 最慢: ${maxTime.toFixed(3)}</span></p><p>AO5: ${ao5}</p><p>AO12: ${ao12}</p>`;
 }
 
 function renderBatchOptions(selectedIndex){
   batchSelect.innerHTML='';
+  if(times.length===0) {
+    let option=document.createElement('option');
+    option.value=0;
+    option.textContent='無紀錄';
+    batchSelect.appendChild(option);
+    return;
+  }
   let totalBatches=Math.ceil(times.length/10);
   for(let i=0;i<totalBatches;i++){
     let option=document.createElement('option');
@@ -163,6 +338,7 @@ function renderBatchOptions(selectedIndex){
 
 function showBatch(batchIndex){
   historyList.innerHTML='';
+  if(times.length===0) return;
   let start=batchIndex*10, end=Math.min(start+10,times.length);
   let minTime=Math.min(...times), maxTime=Math.max(...times);
   for(let i=start;i<end;i++){
@@ -171,12 +347,15 @@ function showBatch(batchIndex){
     if(times[i]===minTime) li.classList.add('fastest');
     if(times[i]===maxTime) li.classList.add('slowest');
     li.addEventListener('click',()=>{
-      times.splice(i,1);
-      let currentBatch=batchSelect.selectedIndex;
-      renderBatchOptions(currentBatch);
-      showBatch(batchSelect.selectedIndex);
-      updateStats();
-      updateDiff();
+      if(confirm(`確定要刪除第 ${i+1} 筆紀錄 (${times[i].toFixed(3)}) 嗎？`)){
+        times.splice(i,1);
+        saveHistory();
+        let currentBatch=batchSelect.selectedIndex;
+        renderBatchOptions(currentBatch);
+        showBatch(batchSelect.selectedIndex);
+        updateStats();
+        updateDiff();
+      }
     });
     historyList.appendChild(li);
   }
@@ -184,10 +363,11 @@ function showBatch(batchIndex){
 
 batchSelect.addEventListener('change', e=>{ showBatch(parseInt(e.target.value)); });
 
-// ===== 清除全部 =====
+// 清除全部
 document.getElementById('clearAllBtn').addEventListener('click',()=>{
   if(confirm("確定要清除所有紀錄嗎？")){
     times=[];
+    saveHistory();
     renderBatchOptions(0);
     showBatch(0);
     updateStats();
@@ -195,7 +375,7 @@ document.getElementById('clearAllBtn').addEventListener('click',()=>{
   }
 });
 
-// ===== 匯出數據 =====
+// 匯出數據
 document.getElementById('exportBtn').addEventListener('click',()=>{
   if(times.length===0){ alert("目前沒有數據可匯出"); return; }
   let csv="序號,時間,與上一筆差值,梯次\n";
@@ -205,31 +385,35 @@ document.getElementById('exportBtn').addEventListener('click',()=>{
     let batch=Math.floor(i/batchSize)+1;
     csv+=`${i+1},${t.toFixed(3)},${diff},${batch}\n`;
   });
-  let blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  let blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
   let url=URL.createObjectURL(blob);
   let a=document.createElement('a');
   a.href=url;
-  a.download="cube_timer_data.csv";
+  let date=new Date().toISOString().split('T')[0];
+  a.download=`cube_timer_${date}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 });
 
-// ===== 計時中長按重置 =====
+// 計時中長按重置
 function resetTimerDuringRun(){
   clearInterval(interval);
   interval=null;
   startTime=null;
   state="idle";
   timerEl.textContent="0.000";
+  timerEl.style.color="white";
   minimalEl.textContent="0.000";
   minimalEl.style.display="none";
+  timerEl.style.display="block";
   document.getElementById('scramble').style.display='block';
   document.getElementById('historyContainer').style.display='flex';
   document.getElementById('stats').style.display='block';
-  diffEl.innerHTML="";
+  document.getElementById('diff').style.display='block';
+  document.getElementById('cubeVisualization').style.display='block';
 }
 
-// ===== 火柴式長按觸控 =====
+// 火柴式長按觸控
 function handlePressStart(e){
   if(e.cancelable) e.preventDefault();
   clearTimeout(resetTimeout);
@@ -243,7 +427,6 @@ function handlePressStart(e){
     resetTimeout=setTimeout(()=>{ if(state==="running") resetTimerDuringRun(); },3000);
   }
 }
-
 function handlePressEnd(e){
   if(e.cancelable) e.preventDefault();
   clearTimeout(readyTimeout);
@@ -253,7 +436,6 @@ function handlePressEnd(e){
   else{ state="idle"; timerEl.style.color="white"; }
 }
 
-// 綁定觸控
 const layer=document.getElementById('timerLayer');
 [layer,document.getElementById('scramble'),historyList].forEach(el=>{
   el.addEventListener("touchstart",handlePressStart,{passive:false});
@@ -262,7 +444,7 @@ const layer=document.getElementById('timerLayer');
   el.addEventListener("mouseup",handlePressEnd,{passive:false});
 });
 
-// ===== 空白鍵長按觸控 =====
+// 空白鍵長按觸控
 document.addEventListener("keydown", e=>{
   if(e.code==="Space"){
     e.preventDefault();
@@ -284,8 +466,21 @@ document.addEventListener("keyup",e=>{
   }
 });
 
-// 初始 scramble
+// 防止頁面滾動
+document.body.addEventListener('touchmove', e=>{ if(state!=="idle") e.preventDefault(); }, {passive:false});
+
+// 初始化
 newScramble();
+loadHistory();
+renderCube();
 </script>
+
+  <script>
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 64, 64); // 全透明
+    document.getElementById('favicon').href = canvas.toDataURL();
+  </script>
 </body>
 </html>
